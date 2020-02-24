@@ -38,7 +38,7 @@ entity cmdProc is
   
     clk: in std_logic;
     reset: in std_logic;
-    rxnow: in std_logic; 
+    rxnow: in std_logic; -- 'VALID' SIGNAL in specification    
     rxData: in std_logic_vector (7 downto 0);
     txData: out std_logic_vector (7 downto 0);
     rxdone: out std_logic;
@@ -58,13 +58,37 @@ entity cmdProc is
 end cmdProc;
 
 architecture Behavioral of cmdProc is
-
+TYPE state_type is (IDLE, FIRST, SECOND);   	
+    SIGNAL curState, nextState: STATE_TYPE; -- Simple state transtition table, logic for each state should be coded after this proccess
 begin
-
+    combi_nextState: process(curState, rxnow, seqDone)
+    begin
+      CASE curState IS
+      
+        WHEN IDLE =>
+	      IF rxnow = '1' THEN
+	        nextState <= FIRST;
+	      ELSE
+	        nextState <= IDLE;
+	      END IF;
     
-
-
-
-
-
+        WHEN FIRST =>
+          nextState <= SECOND;
+          
+        WHEN SECOND =>
+          IF seqDone = '1' THEN
+            nextState <= IDLE;
+          ELSE
+            nextState <= SECOND;
+          END IF; 
+          
+      END CASE;
+    END PROCESS;
+        
+    echoToTerminal: process(curState, rxnow)  -- process to echo computer input to computer terminal during idle state
+    begin
+        IF curState = IDLE THEN
+            txData <= rxData;
+        END IF;
+        
 end Behavioral;
