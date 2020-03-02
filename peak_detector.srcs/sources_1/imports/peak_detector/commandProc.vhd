@@ -21,7 +21,7 @@
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
-
+use ieee.numeric_std.all;
 use work.common_pack.all;
 
 -- Uncomment the following library declaration if using
@@ -58,37 +58,66 @@ entity cmdProc is
 end cmdProc;
 
 architecture Behavioral of cmdProc is
-TYPE state_type is (IDLE, FIRST, SECOND);   	
-    SIGNAL curState, nextState: STATE_TYPE; -- Simple state transtition table, logic for each state should be coded after this proccess
+TYPE state_type is (IDLE, START_TRANS, TRANS_DATA, INPUT_GOOD);   	
+    SIGNAL curState, nextState: STATE_TYPE; 
+    SIGNAL count: integer;
+    SIGNAL cntReset: std_logic;
+    SIGNAL enCount: boolean;
+    
 begin
     combi_nextState: process(curState, rxnow, seqDone)
     begin
+    -- Declaring variables for the counter
+      count <= 0;
+      enCount <= FALSE;
+      
       CASE curState IS
       
-        WHEN IDLE =>
-	      IF rxnow = '1' THEN
-	        nextState <= FIRST;
-	      ELSE
-	        nextState <= IDLE;
-	      END IF;
-    
-        WHEN FIRST =>
-          nextState <= SECOND;
-          
-        WHEN SECOND =>
-          IF seqDone = '1' THEN
-            nextState <= IDLE;
-          ELSE
-            nextState <= SECOND;
-          END IF; 
-          
+        WHEN IDLE =>  -- need to consider l and p inputs also *implement later*
+            cntReset <= '0';
+            if rxnow = '1' then  -- detect if rx has data to input
+                if count = 0 then  -- checks if the first character is 'a' or 'A'
+                    if rxData = "01000001" or rxData = "01100001" then
+                        enCount <= TRUE;
+                        nextState <= START_TRANS;
+                    end if;  
+                elsif count = 1 or count = 2 then -- checks if 2nd and 3rd characters are numbers
+                    if rxData >= "00110000" and rxData <= "00111001" then
+                        enCount <= TRUE;
+                        nextState <= START_TRANS;
+                    end if;
+                elsif count = 3 then -- checks if 4th character is a number  
+                    if rxData >= "00110000" and rxData <= "00111001" then  
+                        cntReset <= '1';                    
+                        nextState <= INPUT_GOOD;
+                    end if;
+                else
+                    cntReset <= '1';           
+	            end if;
+	  	     else
+	  	        nextState <= IDLE;
+	  	     end if;
+	  	     	               
       END CASE;
     END PROCESS;
-        
-    echoToTerminal: process(curState, rxnow)  -- process to echo computer input to computer terminal during idle state
-    begin
-        IF curState = IDLE THEN
-            txData <= rxData;
-        END IF;
-        
+    
+         
+    PROCESS(cntReset,clk)  -- counter used when checking the input characters from rx, counts up each time the character is correct and resets when invalid input
+       BEGIN
+          IF cntReset = '1' THEN -- active high reset
+              count <= 0;
+           ELSIF clk'EVENT and clk='1' THEN
+              IF enCount = TRUE THEN -- enable
+                 count <= count + 1;
+              END IF;
+           END IF;
+        END PROCESS;
+   
+    seq_state: PROCESS (clk, reset)
+     BEGIN
+       IF clk'EVENT AND clk='1' THEN
+         curState <= nextState;
+       END IF;
+     END PROCESS;          
+                                      
 end Behavioral;
