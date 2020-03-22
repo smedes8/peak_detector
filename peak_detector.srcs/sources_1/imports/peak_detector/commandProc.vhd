@@ -1,23 +1,3 @@
-----------------------------------------------------------------------------------
--- Company: 
--- Engineer: 
--- 
--- Create Date: 24.02.2020 11:51:34
--- Design Name: 
--- Module Name: commandProc - Behavioral
--- Project Name: 
--- Target Devices: 
--- Tool Versions: 
--- Description: 
--- 
--- Dependencies: 
--- 
--- Revision:
--- Revision 0.01 - File Created
--- Additional Comments:
--- 
-----------------------------------------------------------------------------------
-
 
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
@@ -63,46 +43,75 @@ TYPE state_type is (IDLE, START_TRANS, TRANS_DATA, INPUT_GOOD);
     SIGNAL count: integer;
     SIGNAL cntReset: std_logic;
     SIGNAL enCount: boolean;
+    SIGNAL Q, D: std_logic_vector(11 downto 0);
+    SIGNAL num: std_logic_vector(3 downto 0);
     
 begin
     combi_nextState: process(curState, rxnow, seqDone)
     begin
-    -- Declaring variables for the counter
+    -- Assigning variables for the counter
       count <= 0;
       enCount <= FALSE;
-      
+     
       CASE curState IS
       
-        WHEN IDLE =>  -- need to consider l and p inputs also *implement later*
+        WHEN IDLE =>  -- need to consider L and P inputs also *implement later*
             cntReset <= '0';
+            -- Converting ascii to bcd
+            if rxdata(7 downto 4) = "0011" then
+              if rxdata(3 downto 0) <= "1001" and rxdata(3 downto 0) >= "0000" then
+                num <= rxdata(3 downto 0);
+              end if;
+            end if;
+            
             if rxnow = '1' then  -- detect if rx has data to input
                 if count = 0 then  -- checks if the first character is 'a' or 'A'
                     if rxData = "01000001" or rxData = "01100001" then
                         enCount <= TRUE;
                         nextState <= START_TRANS;
+                    else
+                      nextState <= START_TRANS;
                     end if;  
-                elsif count = 1 or count = 2 then -- checks if 2nd and 3rd characters are numbers
+                elsif count = 1 then -- checks if 2nd is a number
                     if rxData >= "00110000" and rxData <= "00111001" then
+                        D(3 downto 0) <= num;
                         enCount <= TRUE;
                         nextState <= START_TRANS;
+                    else
+                      nextState <= START_TRANS;
+                    end if;
+                elsif count = 2 then -- checks if 3rd character is a number
+                    if rxData >= "00110000" and rxData <= "00111001" then
+                        D(7 downto 4) <= num;
+                        enCount <= TRUE;
+                        nextState <= START_TRANS;
+                    else
+                      nextState <= START_TRANS;
                     end if;
                 elsif count = 3 then -- checks if 4th character is a number  
-                    if rxData >= "00110000" and rxData <= "00111001" then  
+                    if rxData >= "00110000" and rxData <= "00111001" then
+                        D(11 downto 8) <= num;  
                         cntReset <= '1';                    
                         nextState <= INPUT_GOOD;
+                    else
+                      nextState <= START_TRANS;
                     end if;
                 else
+                    nextState <= START_TRANS;
                     cntReset <= '1';           
 	            end if;
-	  	     else
-	  	        nextState <= IDLE;
-	  	     end if;
+	  	    else
+	  	       nextState <= IDLE;
+	  	    end if;
+	  	    
+	  	    
+	  	    
 	  	     	               
       END CASE;
     END PROCESS;
     
          
-    PROCESS(cntReset,clk)  -- counter used when checking the input characters from rx, counts up each time the character is correct and resets when invalid input
+    PROCESS(cntReset,clk)  -- counter used when checking the input characters from rx, counts up each time the character is correct (a or number) and resets when invalid input
        BEGIN
           IF cntReset = '1' THEN -- active high reset
               count <= 0;
@@ -112,6 +121,13 @@ begin
               END IF;
            END IF;
         END PROCESS;
+        
+    reg: PROCESS (clk, Q, D)
+      BEGIN
+        IF clk'EVENT AND clk='1' THEN
+          Q <= D;
+        END IF;
+      END PROCESS;
    
     seq_state: PROCESS (clk, reset)
      BEGIN
