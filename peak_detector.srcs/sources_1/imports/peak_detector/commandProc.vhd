@@ -1,4 +1,3 @@
-
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use ieee.numeric_std.all;
@@ -38,7 +37,7 @@ entity cmdProc is
 end cmdProc;
 
 architecture Behavioral of cmdProc is
-TYPE state_type is (IDLE, START_TRANS, TRANS_DATA, INPUT_GOOD);   	
+TYPE state_type is (IDLE, COUNT_PLUS, COUNT_RES, START_TRANS, TRANS_DATA, INPUT_GOOD);   	
     SIGNAL curState, nextState: STATE_TYPE; 
     SIGNAL count: integer;
     SIGNAL cntReset: std_logic;
@@ -49,14 +48,14 @@ TYPE state_type is (IDLE, START_TRANS, TRANS_DATA, INPUT_GOOD);
 begin
     combi_nextState: process(curState, rxnow, seqDone)
     begin
-    -- Assigning variables for the counter
+    -- Assigning values for the counter
       count <= 0;
-      enCount <= FALSE;
+      enCount <= False;
      
       CASE curState IS
       
-        WHEN IDLE =>  -- need to consider L and P inputs also *implement later*
-            cntReset <= '0';
+        WHEN IDLE =>  
+            enCount <= False;
             -- Converting ascii to bcd
             if rxdata(7 downto 4) = "0011" then
               if rxdata(3 downto 0) <= "1001" and rxdata(3 downto 0) >= "0000" then
@@ -67,46 +66,44 @@ begin
             if rxnow = '1' then  -- detect if rx has data to input
                 if count = 0 then  -- checks if the first character is 'a' or 'A'
                     if rxData = "01000001" or rxData = "01100001" then
-                        enCount <= TRUE;
-                        nextState <= START_TRANS;
+                      nextState <= COUNT_PLUS;
                     else
                       nextState <= START_TRANS;
                     end if;  
-                elsif count = 1 then -- checks if 2nd is a number
-                    if rxData >= "00110000" and rxData <= "00111001" then
+                elsif rxData >= "00110000" and rxData <= "00111001" then -- checks if the next characters are numbers
+                    if count = 1 then
                         D(3 downto 0) <= num;
-                        enCount <= TRUE;
-                        nextState <= START_TRANS;
-                    else
-                      nextState <= START_TRANS;
-                    end if;
-                elsif count = 2 then -- checks if 3rd character is a number
-                    if rxData >= "00110000" and rxData <= "00111001" then
+                    elsif count = 2 then 
                         D(7 downto 4) <= num;
-                        enCount <= TRUE;
-                        nextState <= START_TRANS;
-                    else
-                      nextState <= START_TRANS;
-                    end if;
-                elsif count = 3 then -- checks if 4th character is a number  
-                    if rxData >= "00110000" and rxData <= "00111001" then
-                        D(11 downto 8) <= num;  
-                        cntReset <= '1';                    
-                        nextState <= INPUT_GOOD;
-                    else
-                      nextState <= START_TRANS;
-                    end if;
+                    elsif count = 3 then 
+                        D(11 downto 8) <= num;
+                    end if;    
+                    nextState <= COUNT_PLUS;
                 else
-                    nextState <= START_TRANS;
-                    cntReset <= '1';           
-	            end if;
-	  	    else
-	  	       nextState <= IDLE;
+                    nextState <= COUNT_RES;
+                end if;
+            end if;              
+	  	     	      
+	  	 WHEN COUNT_PLUS =>
+	  	    enCount <= True;
+	  	    nextState <= START_TRANS;
+	  	    
+	  	 WHEN COUNT_RES =>
+	  	    cntReset <= '1';
+	  	    nextState <= START_TRANS;      
+	  	     	              
+	  	 WHEN START_TRANS =>
+	  	    RxDone <= '1';
+	  	    TxNow <= '1'; 
+	  	    if TxDone <= '1' then
+	  	        if count < 4 then
+	  	            nextState <= IDLE;
+	  	        else 
+	  	            nextState <= INPUT_GOOD;
+	  	        end if;
+	  	    else nextState <= START_TRANS;
 	  	    end if;
-	  	    
-	  	    
-	  	    
-	  	     	               
+	  	     	              
       END CASE;
     END PROCESS;
     
