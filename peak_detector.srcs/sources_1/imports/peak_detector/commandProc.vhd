@@ -2,15 +2,7 @@ library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use ieee.numeric_std.all;
 use work.common_pack.all;
-
--- Uncomment the following library declaration if using
--- arithmetic functions with Signed or Unsigned values
---use IEEE.NUMERIC_STD.ALL;
-
--- Uncomment the following library declaration if instantiating
--- any Xilinx leaf cells in this code.
---library UNISIM;
---use UNISIM.VComponents.all;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
 
 entity cmdProc is
   Port ( 
@@ -37,46 +29,40 @@ entity cmdProc is
 end cmdProc;
 
 architecture Behavioral of cmdProc is
-TYPE state_type is (IDLE, COUNT_PLUS, COUNT_RES, START_TRANS, TRANS_DATA, INPUT_GOOD);   	
+TYPE state_type is (IDLE, COUNT_PLUS, COUNT_RES, START_TRANS, TRANS_DATA, INPUT_CHECK, INPUT_GOOD,
+                    RECIEVE);   	
     SIGNAL curState, nextState: STATE_TYPE; 
-    SIGNAL count: integer;
     SIGNAL cntReset: std_logic;
     SIGNAL enCount: boolean;
     SIGNAL Q, D: std_logic_vector(11 downto 0);
-    SIGNAL num: std_logic_vector(3 downto 0);
+    SIGNAL count: std_logic_vector(3 downto 0);
     
 begin
     combi_nextState: process(curState, rxnow, seqDone)
     begin
     -- Assigning values for the counter
-      count <= 0;
+      count <= "0000";
       enCount <= False;
      
       CASE curState IS
       
         WHEN IDLE =>  
             enCount <= False;
-            -- Converting ascii to bcd
-            if rxdata(7 downto 4) = "0011" then
-              if rxdata(3 downto 0) <= "1001" and rxdata(3 downto 0) >= "0000" then
-                num <= rxdata(3 downto 0);
-              end if;
-            end if;
             
             if rxnow = '1' then  -- detect if rx has data to input
-                if count = 0 then  -- checks if the first character is 'a' or 'A'
+                if count = "0000" then  -- checks if the first character is 'a' or 'A'
                     if rxData = "01000001" or rxData = "01100001" then
                       nextState <= COUNT_PLUS;
                     else
                       nextState <= START_TRANS;
                     end if;  
                 elsif rxData >= "00110000" and rxData <= "00111001" then -- checks if the next characters are numbers
-                    if count = 1 then
-                        D(3 downto 0) <= num;
-                    elsif count = 2 then 
-                        D(7 downto 4) <= num;
-                    elsif count = 3 then 
-                        D(11 downto 8) <= num;
+                    if count = "0001" then
+                        D(3 downto 0) <= rxData(3 downto 0);
+                    elsif count = "0010" then 
+                        D(7 downto 4) <= rxData(3 downto 0);
+                    elsif count = "0011" then 
+                        D(11 downto 8) <= rxData(3 downto 0);
                     end if;    
                     nextState <= COUNT_PLUS;
                 else
@@ -92,17 +78,38 @@ begin
 	  	    cntReset <= '1';
 	  	    nextState <= START_TRANS;      
 	  	     	              
-	  	 WHEN START_TRANS =>
+	  	 WHEN START_TRANS =>  -- assert these signals for one clock cycle
 	  	    RxDone <= '1';
 	  	    TxNow <= '1'; 
-	  	    if TxDone <= '1' then
-	  	        if count < 4 then
-	  	            nextState <= IDLE;
-	  	        else 
-	  	            nextState <= INPUT_GOOD;
-	  	        end if;
-	  	    else nextState <= START_TRANS;
+	  	    nextState <= TRANS_DATA;
+	  	    
+	  	 WHEN TRANS_DATA => -- wait until the data has been printed to screen
+	  	    if TxDone = '1' then
+	  	        nextState <= INPUT_CHECK;
+	  	    else
+	  	        nextState <= TRANS_DATA;
 	  	    end if;
+	  	   
+	  	 WHEN INPUT_CHECK => 
+	  	    TxNow <= '0';
+	  	    RxDone <= '0';
+	  	    if count < "0100" then -- Checks if the register contains axyz
+	  	        nextState <= IDLE;
+	  	    else 
+	  	        nextState <= INPUT_GOOD;
+	  	    end if;
+	  	    
+	  	 WHEN INPUT_GOOD =>
+	  	    cntReset <= '1';
+	  	    numWords_bcd(0) <= Q(3 downto 0);
+	  	    numWords_bcd(1) <= Q(7 downto 4);
+	  	    numWords_bcd(2) <= Q(11 downto 8);
+	  	    nextState <= RECIEVE; 
+	  	   
+	  	 WHEN RECIEVE =>
+	  	    TxNow <= '0';
+	  	    start <= '1';
+	  	  
 	  	     	              
       END CASE;
     END PROCESS;
@@ -111,12 +118,12 @@ begin
     PROCESS(cntReset,clk)  -- counter used when checking the input characters from rx, counts up each time the character is correct (a or number) and resets when invalid input
        BEGIN
           IF cntReset = '1' THEN -- active high reset
-              count <= 0;
-           ELSIF clk'EVENT and clk='1' THEN
-              IF enCount = TRUE THEN -- enable
-                 count <= count + 1;
-              END IF;
-           END IF;
+              count <= "0000";
+          ELSIF clk'EVENT and clk='1' THEN
+             IF enCount = TRUE THEN -- enable
+                count<=count+'1';
+             END IF;
+          END IF;
         END PROCESS;
         
     reg: PROCESS (clk, Q, D)
