@@ -29,57 +29,65 @@ entity cmdProc is
 end cmdProc;
 
 architecture Behavioral of cmdProc is
-TYPE state_type is (IDLE, COUNT_PLUS, COUNT_RES, START_TRANS, TRANS_DATA, INPUT_CHECK, INPUT_GOOD,
+TYPE state_type is (IDLE, RNOW, COUNT_PLUS, COUNT_RES, START_TRANS, TRANS_DATA, INPUT_CHECK, INPUT_GOOD,
                     RECIEVE);   	
     SIGNAL curState, nextState: STATE_TYPE; 
     SIGNAL cntReset: std_logic;
     SIGNAL enCount: boolean;
     SIGNAL Q, D: std_logic_vector(11 downto 0);
-    SIGNAL count: std_logic_vector(3 downto 0);
+    SIGNAL count: integer := 0;
     
 begin
     combi_nextState: process(curState, rxnow, seqDone)
     begin
     -- Assigning values for the counter
-      count <= "0000";
+      
+      cntReset <= '0';
       enCount <= False;
+      rxDone <= '0';
+      txNow <= '0';
      
       CASE curState IS
       
         WHEN IDLE =>  
-            enCount <= False;
-            
             if rxnow = '1' then  -- detect if rx has data to input
-                if count = "0000" then  -- checks if the first character is 'a' or 'A'
-                    if rxData = "01000001" or rxData = "01100001" then
-                      nextState <= COUNT_PLUS;
-                    else
-                      nextState <= START_TRANS;
-                    end if;  
-                elsif rxData >= "00110000" and rxData <= "00111001" then -- checks if the next characters are numbers
-                    if count = "0001" then
-                        D(3 downto 0) <= rxData(3 downto 0);
-                    elsif count = "0010" then 
-                        D(7 downto 4) <= rxData(3 downto 0);
-                    elsif count = "0011" then 
-                        D(11 downto 8) <= rxData(3 downto 0);
-                    end if;    
-                    nextState <= COUNT_PLUS;
+                nextState <= RNOW;
+            else
+                nextState <= IDLE;
+            end if;           
+                
+                
+        WHEN RNOW =>
+            if count = 0 then  -- checks if the first character is 'a' or 'A'
+                if rxData = "01100001" or rxData = "01100101" then
+                  nextState <= COUNT_PLUS;
                 else
-                    nextState <= COUNT_RES;
-                end if;
+                  nextState <= COUNT_RES;
+                end if;  
+            elsif rxData >= "00110000" and rxData <= "00111001" then -- checks if the next characters are numbers
+                if count = 1 then
+                    D(11 downto 8) <= rxData(3 downto 0);
+                elsif count = 2 then 
+                    D(7 downto 4) <= rxData(3 downto 0);
+                elsif count = 3 then 
+                    D(3 downto 0) <= rxData(3 downto 0);
+                end if;    
+                nextState <= COUNT_PLUS;
+            else
+                nextState <= COUNT_RES;
             end if;              
 	  	     	      
 	  	 WHEN COUNT_PLUS =>
 	  	    enCount <= True;
+	  	    RxDone <= '1';
 	  	    nextState <= START_TRANS;
 	  	    
 	  	 WHEN COUNT_RES =>
 	  	    cntReset <= '1';
+	  	    RxDone <= '1';
 	  	    nextState <= START_TRANS;      
 	  	     	              
 	  	 WHEN START_TRANS =>  -- assert these signals for one clock cycle
-	  	    RxDone <= '1';
 	  	    TxNow <= '1'; 
 	  	    nextState <= TRANS_DATA;
 	  	    
@@ -93,7 +101,7 @@ begin
 	  	 WHEN INPUT_CHECK => 
 	  	    TxNow <= '0';
 	  	    RxDone <= '0';
-	  	    if count < "0100" then -- Checks if the register contains axyz
+	  	    if count < 4 then -- Checks if the register contains axyz
 	  	        nextState <= IDLE;
 	  	    else 
 	  	        nextState <= INPUT_GOOD;
@@ -115,23 +123,23 @@ begin
     END PROCESS;
     
          
-    PROCESS(cntReset,clk)  -- counter used when checking the input characters from rx, counts up each time the character is correct (a or number) and resets when invalid input
-       BEGIN
-          IF cntReset = '1' THEN -- active high reset
-              count <= "0000";
-          ELSIF clk'EVENT and clk='1' THEN
-             IF enCount = TRUE THEN -- enable
-                count<=count+'1';
-             END IF;
-          END IF;
-        END PROCESS;
+    counter: PROCESS(clk)  -- counter used when checking the input characters from rx, counts up each time the character is correct (a or number) and resets when invalid input
+     BEGIN
+       IF cntReset = '1' THEN -- active high reset
+         count <= 0;
+       ELSIF clk'EVENT and clk='1' THEN
+         IF enCount = TRUE THEN -- enable
+           count <= count+1;
+         END IF;
+       END IF;
+     END PROCESS;
         
     reg: PROCESS (clk, Q, D)
-      BEGIN
-        IF clk'EVENT AND clk='1' THEN
-          Q <= D;
-        END IF;
-      END PROCESS;
+     BEGIN
+       IF clk'EVENT AND clk='1' THEN
+         Q <= D;
+       END IF;
+     END PROCESS;
    
     seq_state: PROCESS (clk, reset)
      BEGIN
