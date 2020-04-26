@@ -29,8 +29,8 @@ entity cmdProc is
 end cmdProc;
 
 architecture Behavioral of cmdProc is
-TYPE state_type is (IDLE, RNOW, COUNT_PLUS, COUNT_RES, START_TRANS, TRANS_DATA, INPUT_CHECK, INPUT_GOOD,
-                    RECIEVE, DATA_TERMINAL);   	
+TYPE state_type is (IDLE, RNOW, COUNT_PLUS, COUNT_RES, START_TRANS, TRANS_DATA, WAITING, INPUT_CHECK, INPUT_GOOD, ACTIVATE,
+                    RECIEVE, DATA_TERMINAL_ONE, PRINT_FIRST, WAIT_PRINT, DATA_TERMINAL_TWO, PRINT_SECOND, SEQ_DONE);   	
     SIGNAL curState, nextState: STATE_TYPE; 
     SIGNAL cntReset: std_logic;
     SIGNAL enCount: boolean;
@@ -38,17 +38,18 @@ TYPE state_type is (IDLE, RNOW, COUNT_PLUS, COUNT_RES, START_TRANS, TRANS_DATA, 
     SIGNAL count: integer := 0;
     
 begin
-    combi_nextState: process(curState, rxnow, seqDone)
+    combi_nextState: process(curState, rxnow, txdone, seqDone)
     begin
     -- Assigning values for the counter
-      
+      TxData <= "00000000";
       cntReset <= '0';
       enCount <= False;
       rxDone <= '0';
       txNow <= '0';
+      start <= '0';     
      
       CASE curState IS
-      
+              
         WHEN IDLE =>  
             if rxnow = '1' then  -- detect if rx has data to input
                 nextState <= RNOW;
@@ -88,15 +89,9 @@ begin
 	  	    nextState <= START_TRANS;      
 	  	     	              
 	  	 WHEN START_TRANS =>  -- assert these signals for one clock cycle
+	  	    TxData <= RxData;
 	  	    TxNow <= '1'; 
-	  	    nextState <= TRANS_DATA;
-	  	    
-	  	 WHEN TRANS_DATA => -- wait until the data has been printed to screen
-	  	    if TxDone = '1' then
-	  	        nextState <= INPUT_CHECK;
-	  	    else
-	  	        nextState <= TRANS_DATA;
-	  	    end if;
+	  	    nextState <= INPUT_CHECK;   
 	  	   
 	  	 WHEN INPUT_CHECK => 
 	  	    TxNow <= '0';
@@ -107,39 +102,81 @@ begin
 	  	        nextState <= INPUT_GOOD;
 	  	    end if;
 	  	    
-	  	 WHEN INPUT_GOOD =>
+	  	 WHEN INPUT_GOOD => -- sends number of words to the data processor
 	  	    cntReset <= '1';
 	  	    numWords_bcd(0) <= Q(3 downto 0);
 	  	    numWords_bcd(1) <= Q(7 downto 4);
 	  	    numWords_bcd(2) <= Q(11 downto 8);
+	  	    nextState <= WAITING; 
+	  	   
+	  	 WHEN WAITING =>  -- waits for txmodule to be ready
+	  	    if txdone = '1' then
+	  	        nextState <= ACTIVATE;
+	  	    else 
+	  	        nextState <= WAITING;
+	  	    end if;
+	  	   
+	  	 WHEN ACTIVATE =>  -- asserts start for 1 clock cycle
+	  	    start <= '1';
 	  	    nextState <= RECIEVE; 
 	  	   
-	  	 WHEN RECIEVE =>
-	  	    TxNow <= '0';
-	  	    start <= '1';
-	  	    if dataReady <= '1' then
-	  	        nextState <= DATA_TERMINAL;
+	  	 WHEN RECIEVE => -- stops the data request and saves the data to a register when it is ready
+	  	    start <= '0';
+	  	    if dataReady <= '1' then	  	      
+	  	        nextState <= DATA_TERMINAL_ONE;
 	  	    else
 	  	        nextState <= RECIEVE;
 	  	    end if;
 	  	    
-	  	 WHEN DATA_TERMINAL =>
-	  	    TxNow <= '1';
-	  	    if TxDone <= '1' then
-	  	        if seqDone <= '1' then 
-	  	            nextState <= IDLE;
-	  	        else 
-	  	            nextState <= RECIEVE;
-	  	        end if;
-	  	   else
-	  	        nextState <= DATA_TERMINAL;
-	  	   end if;     
-	  	        
+	  	 WHEN DATA_TERMINAL_ONE =>
+	  	    if byte(7 downto 4) > 1001 then
+	  	        D(7 downto 4) <= "0100";
+	  	        D(3 downto 0) <= (byte(7 downto 4) - 1001); 
+	  	    else 
+	  	        D(7 downto 4) <= "0011";
+	  	        D(3 downto 0) <= byte(7 downto 4); 
+	  	    end if;
+	  	    nextState <= PRINT_FIRST;
 	  	    
+	  	 WHEN PRINT_FIRST =>
+	  	    txData <= Q(7 downto 0);
+	  	    txNow <= '1';
+	  	    nextState <= WAIT_PRINT;
+	  	    
+	  	 WHEN WAIT_PRINT =>
+	  	    txNow <= '0';
+	  	    if txdone = '1' then
+	  	        nextState <= DATA_TERMINAL_TWO;
+	  	    else
+	  	        nextState <= WAIT_PRINT;
+	  	    end if;
+	  	    
+	  	 WHEN DATA_TERMINAL_TWO =>
+	  	    if byte(3 downto 0) > 1001 then
+	  	        D(7 downto 4) <= "0100";
+	  	        D(3 downto 0) <= (byte(3 downto 0) - 1001); 
+	  	    else 
+	  	        D(7 downto 4) <= "0011";
+	  	        D(3 downto 0) <= byte(3 downto 0); 
+	  	    end if;
+	  	    nextState <= PRINT_SECOND;
+	  	    
+	  	 WHEN PRINT_SECOND =>
+	  	    txData <= Q(7 downto 0);
+	  	    txNow <= '1';
+	  	    nextState <= SEQ_DONE;
 	  	 
-	  	    
-	  	  
-	  	     	              
+	  	 WHEN SEQ_DONE =>	  	
+	  	    txNow <= '0'; 
+	  	    if seqDone = '1' then
+	  	        nextState <= IDLE;
+	  	    else
+	  	        nextState <= WAITING;
+	  	    end if;
+	  	      	 	  	     	        
+	  	 WHEN OTHERS =>
+	  	    nextState <= IDLE;    	        
+	  	 	  	     	             
       END CASE;
     END PROCESS;
     
