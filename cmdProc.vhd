@@ -29,8 +29,8 @@ entity cmdProc is
 end cmdProc;
 
 architecture Behavioral of cmdProc is
-TYPE state_type is (IDLE, RNOW, COUNT_PLUS, COUNT_RES, START_TRANS, TRANS_DATA, WAITING, INPUT_CHECK, INPUT_GOOD, ACTIVATE,
-                    RECIEVE, DATA_TERMINAL_ONE, PRINT_FIRST, WAIT_PRINT, DATA_TERMINAL_TWO, PRINT_SECOND, SEQ_DONE);   	
+TYPE state_type is (IDLE, RNOW, COUNT_PLUS, COUNT_RES, START_TRANS, TRANS_DATA, WAITING, NEW_LINE, NEW_CARRIAGE, INPUT_CHECK, INPUT_GOOD, ACTIVATE,
+                    RECIEVE, PRINT_FIRST, WAIT_PRINT, PRINT_SECOND, SEQ_DONE);   	
     SIGNAL curState, nextState: STATE_TYPE; 
     SIGNAL cntReset: std_logic;
     SIGNAL enCount: boolean;
@@ -38,7 +38,7 @@ TYPE state_type is (IDLE, RNOW, COUNT_PLUS, COUNT_RES, START_TRANS, TRANS_DATA, 
     SIGNAL count: integer := 0;
     
 begin
-    combi_nextState: process(curState, rxnow, txdone, seqDone)
+    combi_nextState: process(curState, rxnow, txdone, seqDone, dataReady)
     begin
     -- Assigning values for the counter
       TxData <= "00000000";
@@ -110,33 +110,50 @@ begin
 	  	    nextState <= WAITING; 
 	  	   
 	  	 WHEN WAITING =>  -- waits for txmodule to be ready
+	  	    enCount <= false;
+	  	    txNow <= '0';
 	  	    if txdone = '1' then
-	  	        nextState <= ACTIVATE;
+	  	        if count = 0 then
+	  	            nextState <= NEW_LINE;
+	  	        elsif count = 1 then 
+	  	            nextState <= NEW_CARRIAGE;
+	  	        else
+	  	            nextState <= ACTIVATE;
+	  	        end if;
 	  	    else 
 	  	        nextState <= WAITING;
 	  	    end if;
+	  	   
+	  	 WHEN NEW_LINE =>
+	  	    enCount <= True;
+	  	    txData <= "00001010";
+	  	    txNow <= '1';
+	  	    nextState <= WAITING;
+	  	   
+	  	 WHEN NEW_CARRIAGE =>
+	  	    enCount <= True;
+	  	    txData <= "00001101";
+	  	    txNow <= '1';
+	  	    nextState <= WAITING; 	   
 	  	   
 	  	 WHEN ACTIVATE =>  -- asserts start for 1 clock cycle
 	  	    start <= '1';
 	  	    nextState <= RECIEVE; 
 	  	   
-	  	 WHEN RECIEVE => -- stops the data request and saves the data to a register when it is ready
+	  	 WHEN RECIEVE => -- stops the data request and saves the data once it is ready
 	  	    start <= '0';
-	  	    if dataReady <= '1' then	  	      
-	  	        nextState <= DATA_TERMINAL_ONE;
+	  	    if dataReady = '1' then	  	      
+	  	        if byte(7 downto 4) > 1001 then
+	  	            D(7 downto 4) <= "0100";
+	  	            D(3 downto 0) <= (byte(7 downto 4) - 1001); 
+	  	        else 
+	  	            D(7 downto 4) <= "0011";
+	  	            D(3 downto 0) <= byte(7 downto 4); 
+	  	        end if;
+	  	        nextState <= PRINT_FIRST;
 	  	    else
 	  	        nextState <= RECIEVE;
-	  	    end if;
-	  	    
-	  	 WHEN DATA_TERMINAL_ONE =>
-	  	    if byte(7 downto 4) > 1001 then
-	  	        D(7 downto 4) <= "0100";
-	  	        D(3 downto 0) <= (byte(7 downto 4) - 1001); 
-	  	    else 
-	  	        D(7 downto 4) <= "0011";
-	  	        D(3 downto 0) <= byte(7 downto 4); 
-	  	    end if;
-	  	    nextState <= PRINT_FIRST;
+	  	    end if;	  	    
 	  	    
 	  	 WHEN PRINT_FIRST =>
 	  	    txData <= Q(7 downto 0);
@@ -146,20 +163,18 @@ begin
 	  	 WHEN WAIT_PRINT =>
 	  	    txNow <= '0';
 	  	    if txdone = '1' then
-	  	        nextState <= DATA_TERMINAL_TWO;
+	  	         if byte(3 downto 0) > 1001 then
+	  	            D(7 downto 4) <= "0100";
+	  	            D(3 downto 0) <= (byte(3 downto 0) - 1001); 
+	  	        else 
+	  	            D(7 downto 4) <= "0011";
+	  	            D(3 downto 0) <= byte(3 downto 0); 
+	  	        end if;
+	  	        nextState <= PRINT_SECOND;
 	  	    else
 	  	        nextState <= WAIT_PRINT;
 	  	    end if;
-	  	    
-	  	 WHEN DATA_TERMINAL_TWO =>
-	  	    if byte(3 downto 0) > 1001 then
-	  	        D(7 downto 4) <= "0100";
-	  	        D(3 downto 0) <= (byte(3 downto 0) - 1001); 
-	  	    else 
-	  	        D(7 downto 4) <= "0011";
-	  	        D(3 downto 0) <= byte(3 downto 0); 
-	  	    end if;
-	  	    nextState <= PRINT_SECOND;
+	  	   
 	  	    
 	  	 WHEN PRINT_SECOND =>
 	  	    txData <= Q(7 downto 0);
